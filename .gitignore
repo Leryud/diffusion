@@ -2,6 +2,7 @@
 data/
 
 # Envrionment files
+.venv
 *.lock
 pyproject.toml
 pyrightconfig.json
