@@ -1,0 +1,11 @@
+# Data folder
+data/
+
+# Envrionment files
+*.lock
+pyproject.toml
+pyrightconfig.json
+
+
+# Python runtime folders
+__pycache__/
