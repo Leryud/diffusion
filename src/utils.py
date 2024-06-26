@@ -56,9 +56,11 @@ def forward_diffusion_sample(
         sqrt_one_minus_alphas_cumprod, t, x_0.shape
     )
     # mean + variance
-    return sqrt_alphas_cumprod_t.to(device) * x_0.to(
+    noisy_image = sqrt_alphas_cumprod_t.to(device) * x_0.to(
         device
-    ) + sqrt_one_minus_alphas_cumprod_t.to(device) * noise.to(device), noise.to(device)
+    ) + sqrt_one_minus_alphas_cumprod_t.to(device) * noise.to(device)
+
+    return torch.clamp(noisy_image, -1.0, 1.0), noise.to(device)
 
 
 def test_show_diffusion(
