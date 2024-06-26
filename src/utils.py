@@ -3,20 +3,30 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torchvision import transforms
 import src.config as conf
+from neptune.types import File
+import io
 
 
-def show_images(data, num_samples=4, cols=4):
-    """Plots some samples from the dataset"""
-    plt.figure(figsize=(15, 15))
+def show_images(data, num_samples=4, cols=4, run=None):
+    """Plots some samples from the dataset and logs to Neptune"""
+    fig = plt.figure(figsize=(15, 15))
     for i, img in enumerate(data):
         if i == num_samples:
             break
         plt.subplot(int(num_samples / cols) + 1, cols, i + 1)
         plt.imshow(img[0])
-    plt.show()
+        plt.axis("off")
+
+    if run:
+        # Log the figure to Neptune
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        buf.seek(0)
+        run["dataset/samples"].append(File.as_image(buf))
+    plt.close(fig)
 
 
-def show_tensor_image(image, show=False):
+def show_tensor_image(image, run=None, step=None):
     reverse_transforms = transforms.Compose(
         [
             transforms.Lambda(lambda t: (t + 1) / 2),
@@ -29,9 +39,13 @@ def show_tensor_image(image, show=False):
     # Take first image of batch
     if len(image.shape) == 4:
         image = image[0, :, :, :]
-    plt.imshow(reverse_transforms(image))
-    if show:
-        plt.show()
+
+    pil_image = reverse_transforms(image)
+
+    if run:
+        # Log the PIL image to Neptune
+        run["generated_samples"].append(File.as_image(pil_image), step=step)
+    return pil_image
 
 
 def get_index_from_list(vals, t, x_shape):

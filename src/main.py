@@ -1,20 +1,20 @@
-import torch
-from torch.utils.data import DataLoader
-import torchvision
-from torchvision import transforms
 import matplotlib.pyplot as plt
-from torch.optim import Adam
-
-from src.loss import get_loss
-import src.config as conf
-from src.scheduler import get_scheduler
-from src.utils import (
-    get_index_from_list,
-    show_tensor_image,
-)
-from src.unet import SimpleUnet
-
 import neptune
+import torch
+import torchvision
+from neptune.types import File
+from torch.optim import Adam
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.utils import make_grid
+from tqdm.auto import tqdm
+import io
+
+import src.config as conf
+from src.loss import get_loss
+from src.scheduler import get_scheduler
+from src.unet import SimpleUnet
+from src.utils import get_index_from_list, show_tensor_image
 
 run = neptune.init_run(
     project="leryud/diffusion",
@@ -72,26 +72,58 @@ def sample_timestep(model, x, t):
 
 
 @torch.no_grad()
-def sample_plot_image(model, num):
+def sample_plot_image(model, epoch, run=None):
     # Sample noise
     img_size = conf.IMG_SIZE
     img = torch.randn((1, 3, img_size, img_size), device=conf.device)
-    plt.figure(figsize=(15, 15))
+    fig = plt.figure(figsize=(15, 15))
     plt.axis("off")
     num_images = 10
     stepsize = int(conf.T / num_images)
+
+    generated_images = []
 
     for i in range(0, conf.T)[::-1]:
         t = torch.full((1,), i, device=conf.device)
         img = sample_timestep(model, img, t)
         if i % stepsize == 0:
             plt.subplot(1, num_images, int(i / stepsize) + 1)
-            show_tensor_image(img.detach().cpu())
-    plt.show()
-    plt.savefig(f"{conf.train_samples}/{num}.png")
+            pil_image = show_tensor_image(img.detach().cpu())
+            generated_images.append(pil_image)
+
+    if run:
+        # Log the figure to Neptune
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        buf.seek(0)
+        run["sampling_process"].append(File.as_image(buf), description=f"Epoch {epoch}")
+
+        # Log individual generated images
+        for idx, img in enumerate(generated_images):
+            run["generated_samples"].append(
+                File.as_image(img), description=f"Epoch {epoch}, Step {idx}"
+            )
+
+    plt.close(fig)
+    return generated_images
 
 
 def main():
+    # Initialize Neptune run
+    run = neptune.init_run(
+        project="your_project_name", name="diffusion_model_training", tags=["diffusion", "unet"]
+    )
+
+    # Log configuration parameters
+    run["parameters"] = {
+        "img_size": conf.IMG_SIZE,
+        "batch_size": conf.BATCH_SIZE,
+        "epochs": conf.epochs,
+        "learning_rate": conf.lr,
+        "T": conf.T,
+        "device": str(conf.device),
+    }
+
     data = load_transformed_dataset(img_size=conf.IMG_SIZE)
     dataloader = DataLoader(data, batch_size=conf.BATCH_SIZE, shuffle=True, drop_last=True)
 
@@ -100,19 +132,63 @@ def main():
     optimizer = Adam(model.parameters(), lr=conf.lr)
     epochs = conf.epochs
 
-    for epoch in range(epochs):
-        for step, batch in enumerate(dataloader):
+    # Create a TQDM progress bar for epochs
+    epoch_bar = tqdm(range(epochs), desc="Epochs")
+
+    for epoch in epoch_bar:
+        model.train()
+        epoch_loss = 0.0
+
+        # Create a TQDM progress bar for batches
+        batch_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", leave=False)
+
+        for step, batch in enumerate(batch_bar):
             optimizer.zero_grad()
 
             t = torch.randint(0, conf.T, (conf.BATCH_SIZE,), device=conf.device).long()
             loss = get_loss(model, batch[0], t)
-            run["train/loss"].append(loss)
             loss.backward()
             optimizer.step()
 
-            if epoch % 5 == 0 and step == 0:
-                print(f"Epoch {epoch} | step {step:03d} | loss {loss.item()}")
-                sample_plot_image(model, epoch)
+            # Update batch progress bar
+            batch_bar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+            # Accumulate epoch loss
+            epoch_loss += loss.item()
+
+            # Log batch-level metrics
+            run["train/batch/loss"].append(loss.item())
+            run["train/batch/step"].append(step + epoch * len(dataloader))
+
+        # Calculate and log epoch-level metrics
+        avg_epoch_loss = epoch_loss / len(dataloader)
+        run["train/epoch/loss"].append(avg_epoch_loss)
+        run["train/epoch/number"].append(epoch)
+
+        # Update epoch progress bar
+        epoch_bar.set_postfix({"avg_loss": f"{avg_epoch_loss:.4f}"})
+
+        # Sample and log images every 5 epochs
+        if epoch % 5 == 0:
+            model.eval()
+            with torch.no_grad():
+                sample_images = sample_plot_image(model, epoch)
+                image_grid = make_grid(sample_images, nrow=4)
+
+                # Log the image grid to Neptune
+                run["train/sample_images"].append(
+                    File.as_image(image_grid.permute(1, 2, 0).cpu().numpy()),
+                    description=f"Epoch {epoch}",
+                )
+
+        # Save model checkpoint
+        if (epoch + 1) % 10 == 0:
+            checkpoint_path = f"model_checkpoint_epoch_{epoch+1}.pth"
+            torch.save(model.state_dict(), checkpoint_path)
+            run["checkpoints"].append(File(checkpoint_path))
+
+    # End the Neptune run
+    run.stop()
 
 
 if __name__ == "__main__":
