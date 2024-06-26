@@ -14,6 +14,17 @@ from src.utils import (
 )
 from src.unet import SimpleUnet
 
+import neptune
+
+run = neptune.init_run(
+    project="leryud/diffusion",
+    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzZmE2NmFhMy0wODUzLTQ1YmItYjg3Zi1iMjU1NWQzNzg5YmUifQ==",
+)
+
+
+params = {"learning_rate": conf.lr, "optimizer": "Adam"}
+run["parameters"] = params
+
 
 def load_transformed_dataset(img_size):
     data_transforms = [
@@ -94,6 +105,7 @@ def main():
 
             t = torch.randint(0, conf.T, (conf.BATCH_SIZE,), device=conf.device).long()
             loss = get_loss(model, batch[0], t)
+            run["train/loss"].append(loss)
             loss.backward()
             optimizer.step()
 
@@ -104,3 +116,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    run.stop()
