@@ -7,6 +7,8 @@ T = 300
 BETA_START = 0.0001
 BETA_END = 0.02
 
+train_samples = "src/results/train"
+
 # Check for CUDA GPU availability
 if torch.cuda.is_available():
     device = torch.device("cuda")
