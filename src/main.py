@@ -72,7 +72,7 @@ def sample_timestep(model, x, t):
 
 
 @torch.no_grad()
-def sample_plot_image(model):
+def sample_plot_image(model, num):
     # Sample noise
     img_size = conf.IMG_SIZE
     img = torch.randn((1, 3, img_size, img_size), device=conf.device)
@@ -88,6 +88,7 @@ def sample_plot_image(model):
             plt.subplot(1, num_images, int(i / stepsize) + 1)
             show_tensor_image(img.detach().cpu())
     plt.show()
+    plt.savefig(f"{conf.train_samples}/{num}.png")
 
 
 def main():
@@ -111,7 +112,7 @@ def main():
 
             if epoch % 5 == 0 and step == 0:
                 print(f"Epoch {epoch} | step {step:03d} | loss {loss.item()}")
-                sample_plot_image(model)
+                sample_plot_image(model, epoch)
 
 
 if __name__ == "__main__":
