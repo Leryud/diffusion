@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torchvision import transforms
 import src.config as conf
-from src.scheduler import create_noise_schedule
 
 
 def show_images(data, num_samples=4, cols=4, run=None):
@@ -46,23 +45,6 @@ def get_index_from_list(vals, t, x_shape):
     batch_size = t.shape[0]
     out = vals.gather(-1, t.cpu())
     return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
-
-def add_noise(x, t):
-    """
-    Takes an image and a timestep as input and
-    returns the noisy version of it
-    """
-    scheduler = create_noise_schedule(conf.T)
-    sqrt_alphas_cumprod_t = scheduler["sqrt_alphas_cumprod"][t]
-    sqrt_one_minus_alphas_cumprod_t = scheduler["sqrt_one_minus_alphas_cumprod"][t]
-    
-    noise = torch.randn_like(x).to(conf.device)
-    noisy_image = (sqrt_alphas_cumprod_t * x + sqrt_one_minus_alphas_cumprod_t * noise).to(conf.device)
-    
-    return torch.clamp(noisy_image, -1.0, 1.0), noise
-
-def show_tensor_image(image):
-    return torch.permute((image.clamp(-1, 1) + 1) / 2, (1, -1, 0))
 
 def plot_noise_schedule(diffusion_schedule, num_steps, save_path):
     fig, ax = plt.subplots(figsize=(10, 5))

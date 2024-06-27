@@ -11,10 +11,10 @@ from torchvision.transforms import v2
 from tqdm.auto import tqdm
 
 import src.config as conf
-from src.loss import get_loss
+from src.loss import get_loss, improved_loss
 from src.scheduler import create_noise_schedule
 from src.unet import SimpleUnet
-from src.utils import plot_diffusion_process, plot_noise_schedule, add_noise
+from src.utils import plot_diffusion_process, plot_noise_schedule, show_tensor_image
 
 
 def load_transformed_dataset(img_size):
@@ -67,7 +67,29 @@ def sample_timestep(model, x, t):
     else:
         noise = torch.randn_like(x)
         return model_mean + torch.sqrt(posterior_variance_t) * noise
-
+   
+@torch.no_grad() 
+def sampling_step(model, x, t):
+    output = model(x, t)
+    x_theta, v = torch.split(output, output.shape[1] // 2, dim=1)
+    
+    scheduler = create_noise_schedule(conf.T)
+    betas = scheduler['betas']
+    alpha_bar = scheduler['alphas_cumprod']
+    
+    beta_tilde = ((1 - alpha_bar[t-1]) / (1 - alpha_bar[t])) * betas[t]
+    
+    # Compute learned variance
+    variance = torch.exp(v * torch.log(betas[t]) + (1 - v) * torch.log(beta_tilde))
+    
+    # Compute mean
+    mean = (x - betas[t] * x_theta / torch.sqrt(1 - alpha_bar[t])) / torch.sqrt(alpha_bar[t])
+    
+    if t > 0:
+        noise = torch.randn_like(x)
+        return mean + torch.sqrt(variance) * noise
+    else:
+        return mean
 
 @torch.no_grad()
 def sample_plot_image(model, epoch, step, run=None):
@@ -82,7 +104,7 @@ def sample_plot_image(model, epoch, step, run=None):
 
     for i in range(0, conf.T)[::-1]:
         t = torch.full((1,), i, device=conf.device)
-        img = sample_timestep(model, img, t)
+        img = sampling_step(model, img, t)
         img = torch.clamp(img, -1.0, 1.0)
         if i % stepsize == 0:
             sample_images.append(img.cpu().squeeze(0))
@@ -135,6 +157,8 @@ def main():
     )
 
     model = SimpleUnet()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    
     torch.compile(model)
     model.to(conf.device)
 
@@ -162,8 +186,8 @@ def main():
                 t = torch.randint(
                     0, conf.T, (conf.BATCH_SIZE,), device=conf.device
                 ).long()
-                loss = get_loss(model, batch[0], t)
-
+                loss = improved_loss(model, batch[0], t)
+                
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
