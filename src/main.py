@@ -12,9 +12,9 @@ from tqdm.auto import tqdm
 
 import src.config as conf
 from src.loss import get_loss
-from src.scheduler import get_scheduler
+from src.scheduler import create_noise_schedule
 from src.unet import SimpleUnet
-from src.utils import get_index_from_list, show_tensor_image
+from src.utils import plot_diffusion_process, plot_noise_schedule, add_noise
 
 
 def load_transformed_dataset(img_size):
@@ -48,25 +48,18 @@ def sample_timestep(model, x, t):
     Calls the model to predict the noise in the image and returns the denoised image.
     Applies noise to this images if we are not in the last step yet.
     """
-    scheduler = get_scheduler(conf.T)
+    scheduler = create_noise_schedule(conf.T)
 
-    betas_t = get_index_from_list(scheduler["betas"], t, x.shape)
-
-    sqrt_one_minus_alphas_cumprod_t = get_index_from_list(
-        scheduler["sqrt_one_minus_alphas_cumprod"], t, x.shape
-    )
-    sqrt_recip_alphas_t = get_index_from_list(
-        scheduler["sqrt_recip_alphas"], t, x.shape
-    )
+    betas_t = scheduler["betas"][t]
+    sqrt_one_minus_alphas_cumprod_t = scheduler["sqrt_one_minus_alphas_cumprod"][t]
+    sqrt_recip_alphas_t = scheduler["sqrt_recip_alphas"][t]
 
     # Call model (current image - noise_prediction)
     model_mean = sqrt_recip_alphas_t * (
         x - betas_t * model(x, t) / sqrt_one_minus_alphas_cumprod_t
     )
 
-    posterior_variance_t = get_index_from_list(
-        scheduler["posterior_variance"], t, x.shape
-    )
+    posterior_variance_t = scheduler["posterior_variance"][t]
 
     if t == 0:
         # The t's are offset from the t's in the paper
@@ -214,14 +207,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # run.stop()
-
-    # data = load_transformed_dataset(img_size=conf.IMG_SIZE)
-    # dataloader = DataLoader(data, batch_size=conf.BATCH_SIZE, shuffle=True, drop_last=True)
-    # scheduler = get_scheduler(T=conf.T)
-    # test_show_diffusion(
-    #     dataloader=dataloader,
-    #     T=conf.T,
-    #     sqrt_alphas_cumprod=scheduler["sqrt_alphas_cumprod"],
-    #     sqrt_one_minus_alphas_cumprod=scheduler["sqrt_one_minus_alphas_cumprod"],
-    # )

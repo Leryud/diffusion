@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torchvision import transforms
 import src.config as conf
+from src.scheduler import create_noise_schedule
 
 
 def show_images(data, num_samples=4, cols=4, run=None):
@@ -46,58 +47,58 @@ def get_index_from_list(vals, t, x_shape):
     out = vals.gather(-1, t.cpu())
     return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
 
-
-def forward_diffusion_sample(
-    x_0, t, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, device=conf.device
-):
+def add_noise(x, t):
     """
     Takes an image and a timestep as input and
     returns the noisy version of it
     """
-    noise = torch.randn_like(x_0)
-    sqrt_alphas_cumprod_t = get_index_from_list(sqrt_alphas_cumprod, t, x_0.shape)
-    sqrt_one_minus_alphas_cumprod_t = get_index_from_list(
-        sqrt_one_minus_alphas_cumprod, t, x_0.shape
-    )
-    # mean + variance
-    noisy_image = sqrt_alphas_cumprod_t.to(device) * x_0.to(
-        device
-    ) + sqrt_one_minus_alphas_cumprod_t.to(device) * noise.to(device)
+    scheduler = create_noise_schedule(conf.T)
+    sqrt_alphas_cumprod_t = scheduler["sqrt_alphas_cumprod"][t]
+    sqrt_one_minus_alphas_cumprod_t = scheduler["sqrt_one_minus_alphas_cumprod"][t]
+    
+    noise = torch.randn_like(x).to(conf.device)
+    noisy_image = (sqrt_alphas_cumprod_t * x + sqrt_one_minus_alphas_cumprod_t * noise).to(conf.device)
+    
+    return torch.clamp(noisy_image, -1.0, 1.0), noise
 
-    return torch.clamp(noisy_image, -1.0, 1.0), noise.to(device)
+def show_tensor_image(image):
+    return torch.permute((image.clamp(-1, 1) + 1) / 2, (1, -1, 0))
 
-
-def test_show_diffusion(
-    dataloader,
-    T,
-    sqrt_alphas_cumprod,
-    sqrt_one_minus_alphas_cumprod,
-):
-    # Simulate forward diffusion
-    image = next(iter(dataloader))[0]
-
-    fig, axes = plt.subplots(1, 11, figsize=(22, 2))
-    fig.suptitle("Forward Diffusion Process")
-
-    num_images = 10
-    stepsize = int(T / num_images)
-
-    # Show original image
-    axes[0].imshow(show_tensor_image(image))
-    axes[0].axis("off")
-    axes[0].set_title("Original")
-
-    for idx in range(0, T, stepsize):
-        t = torch.Tensor([idx]).type(torch.int64)
-        img, noise = forward_diffusion_sample(
-            image, t, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod
-        )
-        pil_img = show_tensor_image(img)
-
-        ax_idx = int(idx / stepsize) + 1
-        axes[ax_idx].imshow(pil_img)
-        axes[ax_idx].axis("off")
-        axes[ax_idx].set_title(f"t={idx}")
-
+def plot_noise_schedule(diffusion_schedule, num_steps, save_path):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(range(num_steps-1), diffusion_schedule["betas"], label="Beta")
+    ax.plot(range(num_steps-1), diffusion_schedule["alphas_cumprod"], label="Alpha Cumulative Product")
+    ax.plot(range(num_steps-1), diffusion_schedule["sqrt_one_minus_alphas_cumprod"], label="Sqrt(1 - Alpha Cumulative Product)")
+    ax.set_xlabel("Timestep")
+    ax.set_ylabel("Value")
+    ax.set_title("Noise Schedule")
+    ax.legend()
     plt.tight_layout()
-    plt.show()
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_diffusion_process(dataloader, num_steps, diffusion_schedule, save_path):
+    image = next(iter(dataloader))[0]
+    
+    num_images = 10
+    step_size = num_steps // num_images
+    
+    fig, axes = plt.subplots(2, 6, figsize=(20, 7))
+    fig.suptitle("Forward Diffusion Process")
+    
+    axes[0, 0].imshow(show_tensor_image(image[0]))
+    axes[0, 0].axis("off")
+    axes[0, 0].set_title("Original")
+    
+    for idx, timestep in enumerate(range(0, num_steps, step_size)):
+        t = torch.tensor([timestep]).type(torch.int64)
+        noisy_image, _ = add_noise(image, t, diffusion_schedule, image.device)
+        
+        row, col = divmod(idx + 1, 6)
+        axes[row, col].imshow(show_tensor_image(noisy_image[0]))
+        axes[row, col].axis("off")
+        axes[row, col].set_title(f"t={timestep}")
+    
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()

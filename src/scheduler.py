@@ -1,50 +1,45 @@
 import torch
 import torch.nn.functional as F
-import numpy as np
+import src.config as conf
 
+def calculate_alphas(betas):
+    alphas = 1. - betas
+    alphas_cumprod = torch.cumprod(alphas, dim=0)
+    alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), alphas_cumprod[:-1]])
+    return alphas, alphas_cumprod, alphas_cumprod_prev
 
-def adaptive_noise_schedule(
-    t, image_size, schedule_type="cosine", temperature=1.0, b=1.0
-):
+def betas_for_alpha_bar(num_steps, alpha_bar, max_beta=0.999):
+    """
+    Create a beta schedule that discretizes the given alpha_t_bar function,
+    which defines the cumulative product of (1-beta) over time from t = [0,1].
+    """
+    t = torch.linspace(0, 1, num_steps + 1)
+    alpha_bar_vals = alpha_bar(t)
+    betas = 1 - (alpha_bar_vals[1:] / alpha_bar_vals[:-1])
+    return torch.clamp(betas, max=max_beta)
+
+def create_noise_schedule(num_steps, schedule_type="cosine"):
+    scale = 1000 / num_steps
+    beta_start = scale * conf.BETA_START
+    beta_end = scale * conf.BETA_END
+    
     if schedule_type == "cosine":
-        return np.cos(((t / image_size) + 0.008) / 1.008 * np.pi * 0.5) ** 2
-    elif schedule_type == "sigmoid":
-        return 1 / (1 + np.exp(-temperature * (t - 0.5)))
+        alpha_bar = lambda t: torch.cos((t + 0.008) / 1.008 * torch.pi / 2) ** 2
+        betas = betas_for_alpha_bar(num_steps, alpha_bar)
     elif schedule_type == "linear":
-        return 1 - t
+        betas = torch.linspace(beta_start, beta_end, num_steps)
     else:
         raise ValueError("Unknown schedule type")
-
-
-def get_noise_schedule(
-    num_timesteps, image_size, schedule_type="cosine", temperature=1.0, b=1.0
-):
-    t = np.linspace(0, 1, num_timesteps)
-    alphas = adaptive_noise_schedule(t, image_size, schedule_type, temperature, b)
-    alphas = b * alphas  # Apply input scaling
-    betas = 1 - (alphas[1:] / alphas[:-1])
-    return np.clip(betas, 0, 0.999)
-
-
-def get_scheduler(T):
-    betas = get_noise_schedule(
-        num_timesteps=T, image_size=256, schedule_type="cosine", temperature=2.0, b=1.2
-    )
-    alphas = 1.0 - betas
-    alphas_cumprod = torch.cumprod(alphas, dim=0)
-    alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0)
-    sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
-    sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
-    sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - alphas_cumprod)
-    posterior_variance = betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
-
+    
+    alphas, alphas_cumprod, alphas_cumprod_prev = calculate_alphas(betas)
+    
     return {
-        "betas": betas,
-        "alphas": alphas,
-        "alphas_cumprod": alphas_cumprod,
-        "alphas_cumprod_prev": alphas_cumprod_prev,
-        "sqrt_recip_alphas": sqrt_recip_alphas,
-        "sqrt_alphas_cumprod": sqrt_alphas_cumprod,
-        "sqrt_one_minus_alphas_cumprod": sqrt_one_minus_alphas_cumprod,
-        "posterior_variance": posterior_variance,
+        'betas': betas,
+        'alphas': alphas,
+        'alphas_cumprod': alphas_cumprod,
+        'alphas_cumprod_prev': alphas_cumprod_prev,
+        "sqrt_alphas_cumprod": torch.sqrt(alphas_cumprod),
+        "sqrt_one_minus_alphas_cumprod": torch.sqrt(1.0 - alphas_cumprod),
+        "sqrt_recip_alphas": torch.sqrt(1.0 / alphas),
+        "posterior_variance": betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
     }

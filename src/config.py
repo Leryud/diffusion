@@ -7,6 +7,7 @@ T = 1000
 BETA_START = 0.0001
 BETA_END = 0.02
 
+schedule_type = "cosine"
 
 # Check for CUDA GPU availability
 if torch.cuda.is_available():
