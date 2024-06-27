@@ -3,11 +3,10 @@ import torch
 # Configuration parameters
 IMG_SIZE = 64
 BATCH_SIZE = 128
-T = 300
+T = 1000
 BETA_START = 0.0001
 BETA_END = 0.02
 
-train_samples = "src/results/train"
 
 # Check for CUDA GPU availability
 if torch.cuda.is_available():

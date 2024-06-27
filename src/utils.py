@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torchvision import transforms
 import src.config as conf
-from neptune.types import File
-import io
 
 
 def show_images(data, num_samples=4, cols=4, run=None):
@@ -19,14 +17,11 @@ def show_images(data, num_samples=4, cols=4, run=None):
 
     if run:
         # Log the figure to Neptune
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png")
-        buf.seek(0)
-        run["dataset/samples"].append(File.as_image(buf))
+        run["dataset/samples"].upload(fig)
     plt.close(fig)
 
 
-def show_tensor_image(image, run=None, step=None):
+def show_tensor_image(image):
     reverse_transforms = transforms.Compose(
         [
             transforms.Lambda(lambda t: (t + 1) / 2),
@@ -40,12 +35,7 @@ def show_tensor_image(image, run=None, step=None):
     if len(image.shape) == 4:
         image = image[0, :, :, :]
 
-    pil_image = reverse_transforms(image)
-
-    if run:
-        # Log the PIL image to Neptune
-        run["generated_samples"].append(File.as_image(pil_image), step=step)
-    return pil_image
+    return reverse_transforms(image)
 
 
 def get_index_from_list(vals, t, x_shape):
@@ -80,24 +70,34 @@ def forward_diffusion_sample(
 def test_show_diffusion(
     dataloader,
     T,
-    forward_diffusion_sample,
     sqrt_alphas_cumprod,
     sqrt_one_minus_alphas_cumprod,
 ):
     # Simulate forward diffusion
     image = next(iter(dataloader))[0]
 
-    plt.figure(figsize=(15, 15))
-    plt.axis("off")
+    fig, axes = plt.subplots(1, 11, figsize=(22, 2))
+    fig.suptitle("Forward Diffusion Process")
+
     num_images = 10
     stepsize = int(T / num_images)
 
+    # Show original image
+    axes[0].imshow(show_tensor_image(image))
+    axes[0].axis("off")
+    axes[0].set_title("Original")
+
     for idx in range(0, T, stepsize):
         t = torch.Tensor([idx]).type(torch.int64)
-        plt.subplot(1, num_images + 1, int(idx / stepsize) + 1)
         img, noise = forward_diffusion_sample(
             image, t, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod
         )
-        show_tensor_image(img)
+        pil_img = show_tensor_image(img)
 
+        ax_idx = int(idx / stepsize) + 1
+        axes[ax_idx].imshow(pil_img)
+        axes[ax_idx].axis("off")
+        axes[ax_idx].set_title(f"t={idx}")
+
+    plt.tight_layout()
     plt.show()
