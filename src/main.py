@@ -14,7 +14,7 @@ import src.config as conf
 from src.loss import get_loss, improved_loss
 from src.scheduler import create_noise_schedule
 from src.unet import SimpleUnet
-from src.utils import plot_diffusion_process, plot_noise_schedule, show_tensor_image
+from src.utils import show_tensor_image
 
 
 def load_transformed_dataset(img_size):
@@ -55,9 +55,7 @@ def sample_timestep(model, x, t):
     sqrt_recip_alphas_t = scheduler["sqrt_recip_alphas"][t]
 
     # Call model (current image - noise_prediction)
-    model_mean = sqrt_recip_alphas_t * (
-        x - betas_t * model(x, t) / sqrt_one_minus_alphas_cumprod_t
-    )
+    model_mean = sqrt_recip_alphas_t * (x - betas_t * model(x, t) / sqrt_one_minus_alphas_cumprod_t)
 
     posterior_variance_t = scheduler["posterior_variance"][t]
 
@@ -67,29 +65,31 @@ def sample_timestep(model, x, t):
     else:
         noise = torch.randn_like(x)
         return model_mean + torch.sqrt(posterior_variance_t) * noise
-   
-@torch.no_grad() 
+
+
+@torch.no_grad()
 def sampling_step(model, x, t):
     output = model(x, t)
     x_theta, v = torch.split(output, output.shape[1] // 2, dim=1)
-    
+
     scheduler = create_noise_schedule(conf.T)
-    betas = scheduler['betas']
-    alpha_bar = scheduler['alphas_cumprod']
-    
-    beta_tilde = ((1 - alpha_bar[t-1]) / (1 - alpha_bar[t])) * betas[t]
-    
+    betas = scheduler["betas"]
+    alpha_bar = scheduler["alphas_cumprod"]
+
+    beta_tilde = ((1 - alpha_bar[t - 1]) / (1 - alpha_bar[t])) * betas[t]
+
     # Compute learned variance
     variance = torch.exp(v * torch.log(betas[t]) + (1 - v) * torch.log(beta_tilde))
-    
+
     # Compute mean
     mean = (x - betas[t] * x_theta / torch.sqrt(1 - alpha_bar[t])) / torch.sqrt(alpha_bar[t])
-    
+
     if t > 0:
         noise = torch.randn_like(x)
         return mean + torch.sqrt(variance) * noise
     else:
         return mean
+
 
 @torch.no_grad()
 def sample_plot_image(model, epoch, step, run=None):
@@ -131,9 +131,10 @@ def sample_plot_image(model, epoch, step, run=None):
 
 def main():
     # Initialize Neptune run
+    # Previous API key has been revoked
     run = neptune.init_run(
         project="leryud/diffusion",
-        api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzZmE2NmFhMy0wODUzLTQ1YmItYjg3Zi1iMjU1NWQzNzg5YmUifQ==",
+        api_token="API_TOKEN",
     )
 
     # Log configuration parameters
@@ -158,7 +159,7 @@ def main():
 
     model = SimpleUnet()
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    
+
     torch.compile(model)
     model.to(conf.device)
 
@@ -183,11 +184,9 @@ def main():
                 param.grad = None
 
             with autocast():
-                t = torch.randint(
-                    0, conf.T, (conf.BATCH_SIZE,), device=conf.device
-                ).long()
+                t = torch.randint(0, conf.T, (conf.BATCH_SIZE,), device=conf.device).long()
                 loss = improved_loss(model, batch[0], t)
-                
+
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -219,9 +218,7 @@ def main():
 
         # Save model checkpoint
         if (epoch + 1) % 10 == 0:
-            checkpoint_path = (
-                f"/diffusion/results/train/model_checkpoint_epoch_{epoch+1}.pt"
-            )
+            checkpoint_path = f"/diffusion/results/train/model_checkpoint_epoch_{epoch+1}.pt"
             torch.save(model, checkpoint_path)
             run[f"checkpoints/model_checkpoint_epoch_{epoch+1}"].upload(checkpoint_path)
 
